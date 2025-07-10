@@ -1,71 +1,63 @@
-from flask import Blueprint, request, jsonify, send_from_directory
-import os
 import pandas as pd
+import os
 import datetime
 from src.DatabaseConnection import Database
 
-report_download_bp = Blueprint('report_download', __name__)
 db = Database()
 
-# Folder where Excel files will be saved
-GENERATED_FOLDER = os.path.join(os.getcwd(), 'generated_reports')
+def generate_excel_report(campus_id: int, subject_id: int, assessment_type: str):
+    connection = db.connect()
+    cursor = connection.cursor(dictionary=True)
 
-# Ensure the folder exists
-if not os.path.exists(GENERATED_FOLDER):
-    os.makedirs(GENERATED_FOLDER)
+    # Query to get all students with their marks for the specified assessment
+    query = """
+        SELECT 
+            s.student_name,
+            s.RFID,
+            am.total_marks AS total_marks,
+            am.Marks_Acheived AS obtained_marks,
+            ROUND((am.Marks_Acheived / am.total_marks) * 100, 2) AS percentage
+        FROM Students s
+        JOIN assessments_marks am ON s.RFID = am.rfid
+        JOIN Assessments a ON a.assessment_id = am.assessment_id
+        WHERE 
+            s.campusid = %s
+            AND a.subject_id = %s
+            AND a.assessment_type = %s
+    """
 
-@report_download_bp.route('/generate-report', methods=['POST'])
-def generate_report():
-    try:
-        data = request.get_json()
+    cursor.execute(query, (campus_id, subject_id, assessment_type))
+    results = cursor.fetchall()
+    cursor.close()
+    connection.close()
 
-        campus_id = data['campus_id']
-        report_type = data['report_type']            # "Subject-wise" or "Consolidated"
-        subject = data.get('subject')                # Optional
-        cls = data.get('class')                      # Optional
-        report_category = data.get('report_category')# Optional
+    # Convert to DataFrame
+    df = pd.DataFrame(results)
 
-        # ✅ Replace this with actual DB query later
-        df = pd.DataFrame({
-            'Name': ['Zainab', 'Ali'],
-            'Marks': [95, 88]
-        })
+    if df.empty:
+        return None  # No data found
 
-        # 📁 Filename formatting
-        now_str = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
-        safe_subject = subject if subject else report_category or 'General'
-        safe_class = cls if cls else 'All'
-        filename = f"{report_type}_{safe_subject}_{safe_class}_{now_str}.xlsx"
-        filepath = os.path.join(GENERATED_FOLDER, filename)
+    # Rename columns for Excel
+    df.rename(columns={
+        "student_name": "Student Name",
+        "RFID": "RFID",
+        "total_marks": "Total Marks",
+        "obtained_marks": "Obtained Marks",
+        "percentage": "Percentage (%)"
+    }, inplace=True)
 
-        # 📝 Save Excel File
-        df.to_excel(filepath, index=False)
+    # Create output folder if not exists
+    output_dir = os.path.join(os.getcwd(), "generated_reports")
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
 
-        # 🧾 Save report metadata in database
-        db.insert('''
-            INSERT INTO generated_reports 
-            (campus_id, report_type, subject, class, report_category, file_path, generated_by) 
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        ''', (
-            campus_id,
-            report_type,
-            subject,
-            cls,
-            report_category,
-            filepath,
-            'admin_user'  # Replace with actual admin username if available
-        ))
+    # File name
+    filename = f"Report_{assessment_type}_{subject_id}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    filepath = os.path.join(output_dir, filename)
 
-        # 🔗 Return download path
-        download_url = f"http://172.16.22.179:5050/admin/download-report/{filename}"
-        return jsonify({'success': True, 'path': download_url})
+    # Save Excel
+    df.to_excel(filepath, index=False)
 
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+    return filepath
 
-@report_download_bp.route('/download-report/<filename>', methods=['GET'])
-def download_report(filename):
-    try:
-        return send_from_directory(GENERATED_FOLDER, filename, as_attachment=True)
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 404
+generate_excel_report(1,11,'Send Up')
