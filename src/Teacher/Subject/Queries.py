@@ -30,6 +30,7 @@ def get_subject_queries(subject_id):
         LIMIT 5
     """
     queries = db.fetch_all(query, (subject_id,))
+    print (queries)
     return jsonify([{
         'id': q['id'],
         'question': q['question'],
@@ -37,14 +38,14 @@ def get_subject_queries(subject_id):
         'created_at': q['created_at'].isoformat() if q['created_at'] else None,
         'student_name': q['student_name'],
         'student_avatar': get_avatar(q['student_name']),
-        'response': q['answer']
+        'answer': q['answer']
     } for q in queries])
 
 
 @SubjectQuery_bp.route('/api/queries/<int:query_id>/respond', methods=['POST'])
 def respond_to_query(query_id):
     data = request.get_json()
-    response_text = data.get('response')
+    response_text = data.get('answer')
 
     if not response_text:
         return jsonify({'error': 'Response text is required'}), 400
