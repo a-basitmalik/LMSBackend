@@ -3,10 +3,11 @@ from flask_cors import CORS
 
 from src.Teacher.Subject.Assignments import SubjectAssignment_bp
 from src.Teacher.Subject.Attendance import SubjectAttendance_bp
+from src.Teacher.Subject.Chat import Chat_bp
 from src.Teacher.Subject.Queries import SubjectQuery_bp
 from src.Teacher.Subject.Subjects import TeacherSubject_bp
 from src.Teacher.Teacher import Teacher_bp
-from src.admin.ReportDownload import report_download_bp
+# from src.admin.ReportDownload import report_download_bp
 from src.admin.Students import student_bp
 from src.admin.Subjects import subject_bp
 from src.admin.Campus import campus_bp
@@ -46,8 +47,8 @@ app.register_blueprint(TeacherSubject_bp,url_prefix='/TeacherSubject')
 app.register_blueprint(SubjectAttendance_bp,url_prefix='/SubjectAttendance')
 app.register_blueprint(SubjectQuery_bp,url_prefix='/SubjectQuery')
 app.register_blueprint(SubjectAssignment_bp,url_prefix='/SubjectAssignment')
-
-app.register_blueprint(report_download_bp,url_prefix='/ReportDownload')
+app.register_blueprint(Chat_bp,url_prefix='/SubjectChat')
+# app.register_blueprint(report_download_bp,url_prefix='/ReportDownload')
 
 
 if __name__ == '__main__':
