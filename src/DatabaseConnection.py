@@ -74,3 +74,7 @@ class Database:
             conn.commit()
         except mysql.connector.Error as e:
             print("🔥 MySQL Commit Error:", e)
+
+
+
+
