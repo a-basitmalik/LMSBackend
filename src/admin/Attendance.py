@@ -2,11 +2,18 @@ from flask import Blueprint, request, jsonify
 from src.DatabaseConnection import Database
 from datetime import date,datetime
 from collections import defaultdict
+import os
+import pandas as pd
+from flask import send_from_directory
 import traceback
 
 
 db = Database()
 attendance_bp = Blueprint('attendance_bp', __name__)
+
+GENERATED_FOLDER = os.path.join(os.getcwd(), "generated_reports")
+os.makedirs(GENERATED_FOLDER, exist_ok=True)
+
 @attendance_bp.route('/get_attendance', methods=['GET'])
 def get_attendance():
     campus_id = request.args.get('campusId', type=int)
@@ -365,3 +372,149 @@ def attendance_summary():
     except Exception as e:
         print("Error:", str(e))
         return jsonify({"error": str(e)}), 500
+
+
+
+# ─── 1.  API ROUTE  (no params) ───────────────────────────────────────────────
+@attendance_bp.route("/generate_attendance_excel", methods=["GET"])
+def generate_attendance_excel():
+    campus_id = request.args.get("campus_id", type=int)
+    year      = request.args.get("year", type=int, default=0)
+    if campus_id is None:
+        return jsonify({"success": False, "error": "Missing campus_id"}), 400
+
+    try:
+        file_path = _write_attendance_excel(campus_id, year)
+        filename  = os.path.basename(file_path)
+        return send_from_directory(
+            GENERATED_FOLDER, filename, as_attachment=True,
+            download_name=filename,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    except ValueError as e:   # raised when no students
+        return jsonify({"success": False, "error": str(e)}), 404
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+# ─── 2.  HELPER  (takes campus_id & year) ─────────────────────────────────────
+def _write_attendance_excel(campus_id: int, year: int = 0) -> str:
+    """Return the full path of the generated file."""
+    sql = """
+        SELECT student_name, RFID, TotalDays, DaysAttended
+        FROM Students
+        WHERE campusid = %s
+    """
+    params = [campus_id]
+    if year:
+        sql += " AND year = %s"
+        params.append(year)
+
+    rows = db.fetch_all(sql, tuple(params))
+    if not rows:
+        raise ValueError("No students found")
+
+    df = pd.DataFrame(rows).fillna(0)
+    df["TotalDays"]    = df["TotalDays"].astype(int)
+    df["DaysAttended"] = df["DaysAttended"].astype(int)
+    df["Percentage"]   = df.apply(
+        lambda r: round((r.DaysAttended / r.TotalDays) * 100, 2)
+        if r.TotalDays else 0, axis=1
+    )
+    df["Warning"] = df["Percentage"].apply(lambda p: "W" if p < 70 else "")
+
+    df = df.rename(columns={
+        "student_name": "Student Name",
+        "RFID":         "RFID",
+        "TotalDays":    "Total Days",
+        "DaysAttended": "Days Attended"
+    })[["Student Name","RFID","Total Days","Days Attended","Percentage","Warning"]]
+
+    ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
+    suffix   = f"_year_{year}" if year else "_all_years"
+    filename = f"attendance_report_campus_{campus_id}{suffix}_{ts}.xlsx"
+    file_path = os.path.join(GENERATED_FOLDER, filename)
+    df.to_excel(file_path, index=False)
+    return file_path
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+# ─── 1.  ROUTE  ───────────────────────────────────────────────────────────────
+@attendance_bp.route("/generate_fine_excel", methods=["GET"])
+def generate_fine_excel():
+    """
+    Download an Excel sheet listing students who still owe a fine.
+
+    Query params
+    ------------
+    campus_id : int   (required)
+    year      : int   (optional; 1, 2 …; 0 or missing = all years)
+
+    Columns
+    -------
+    Student Name | RFID | Fine
+    (Only rows where Fine > 0)
+    """
+    campus_id = request.args.get("campus_id", type=int)
+    year      = request.args.get("year", type=int, default=0)
+
+    if campus_id is None:
+        return jsonify({"success": False, "error": "Missing campus_id"}), 400
+
+    try:
+        file_path = _write_fine_excel(campus_id, year)
+        filename  = os.path.basename(file_path)
+        return send_from_directory(
+            GENERATED_FOLDER, filename, as_attachment=True,
+            download_name=filename,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    except ValueError as e:        # raised when nobody owes a fine
+        return jsonify({"success": False, "error": str(e)}), 404
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ─── 2.  HELPER  (campus_id & year) ───────────────────────────────────────────
+def _write_fine_excel(campus_id: int, year: int = 0) -> str:
+    """
+    Return the absolute path of the generated fine‑report .xlsx file.
+    """
+    sql = """
+        SELECT student_name, RFID, Fine
+        FROM Students
+        WHERE campusid = %s
+          AND Fine > 0
+    """
+    params = [campus_id]
+    if year:
+        sql += " AND year = %s"
+        params.append(year)
+
+    rows = db.fetch_all(sql, tuple(params))
+    if not rows:
+        raise ValueError("No students with outstanding fines found")
+
+    df = (
+        pd.DataFrame(rows)
+        .fillna({"Fine": 0})
+        .rename(columns={
+            "student_name": "Student Name",
+            "RFID":         "RFID",
+            "Fine":         "Fine",
+        })[["Student Name", "RFID", "Fine"]]
+    )
+
+    ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
+    yr_tag   = f"_year_{year}" if year else "_all_years"
+    filename = f"fine_report_campus_{campus_id}{yr_tag}_{ts}.xlsx"
+    file_path = os.path.join(GENERATED_FOLDER, filename)
+    df.to_excel(file_path, index=False)
+    return file_path
+
+
+
+__all__ = ['attendance_bp']

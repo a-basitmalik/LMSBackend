@@ -685,6 +685,3 @@ def generate_subject_wise_report(campusid, subjectid, year, output_file='subject
 
     # Make sure this is at the bottom of the file:
 __all__ = ['report_download_bp']
-
-
-
