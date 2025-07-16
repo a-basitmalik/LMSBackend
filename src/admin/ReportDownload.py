@@ -10,13 +10,26 @@ report_download_bp = Blueprint('report_download', __name__)
 db = Database()
 
 @report_download_bp.route("/subjects", methods=["GET"])
-def get_subjects():
+def get_subjects_by_campus():
     try:
-        campusid = request.args.get('campusid', type=int)
-        if not campusid:
+        # Get campus ID from query parameters
+        campus_id = request.args.get('campusid')
+        
+        # Validate campus ID exists and is a number
+        if not campus_id:
             return jsonify({"error": "campusid parameter is required"}), 400
+        
+        try:
+            campus_id = int(campus_id)
+        except ValueError:
+            return jsonify({"error": "campusid must be a valid integer"}), 400
 
-        # Fetch subjects for the given campus
+        # Verify campus exists
+        campus_exists = db.fetch_one("SELECT 1 FROM Campuses WHERE CampusID = %s", (campus_id,))
+        if not campus_exists:
+            return jsonify({"error": f"Campus with ID {campus_id} not found"}), 404
+
+        # Fetch subjects only for the specified campus
         subjects_query = """
             SELECT subject_id, subject_name, day, 
                    teacher_name, teacherid, year
@@ -24,16 +37,16 @@ def get_subjects():
             WHERE CampusID = %s
             ORDER BY subject_name
         """
-        subjects = db.fetch_all(subjects_query, (campusid,))
+        subjects = db.fetch_all(subjects_query, (campus_id,))
 
-        if not subjects:
-            return jsonify({"message": "No subjects found for this campus"}), 404
-
-        return jsonify(subjects)
+        return jsonify({
+            "campus_id": campus_id,
+            "subjects": subjects if subjects else []
+        })
 
     except Exception as e:
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+        current_app.logger.error(f"Error fetching subjects: {str(e)}")
+        return jsonify({"error": "An internal server error occurred"}), 500
 
 @report_download_bp.route("/subject-report", methods=["POST"])
 def subject_report():
